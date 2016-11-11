@@ -61,7 +61,7 @@ void process(FILE *f, const char *fname) {
 	unsigned tracks = read2(f, &off);
 	unsigned pulses_per_q = read2(f, &off);
 
-	printf("%s\n", fname);
+	printf("reading %s\n", fname);
 	printf("headerlen %u\n", headerlen);
 	printf("track_types %u\n", track_types);
 	printf("tracks %u\n", tracks);
@@ -93,13 +93,22 @@ void process(FILE *f, const char *fname) {
 				event = data;
 				data = getc(f);
 				off++;
+			} else {
+				printf("repeat event ");
 			}
 
 			if (event >= 0x80 && event <= 0x8F) {
-				printf("note off %u %u\n", event, data);
+				unsigned data2 = getc(f);
+				off++;
+				printf("note off %u %u %u\n", event, data, data2);
+				if (data2 != 0) {
+					printf("expected note off 0\n");
+				}
 			}
 			if (event >= 0x90 && event <= 0x9F) {
-				printf("note on %u %u\n", event, data);
+				unsigned data2 = getc(f);
+				off++;
+				printf("note on %u %u %u\n", event, data, data2);
 			}
 			if (event >= 0xA0 && event <= 0xAF) {
 				unsigned data2 = getc(f);
@@ -120,7 +129,7 @@ void process(FILE *f, const char *fname) {
 			if (event >= 0xE0 && event <= 0xEF) {
 				printf("pitch bend %u %u\n", event, data);
 			}
-			if (event >= 0xF0 && event <= 0xFF) {
+			if (event == 0xFF) {
 				unsigned metalen = readvar(f, &off);
 				char meta[metalen];
 				if (fread(meta, sizeof(char), metalen, f) != metalen) {
@@ -130,6 +139,9 @@ void process(FILE *f, const char *fname) {
 				off += metalen;
 				printf("meta %u %u\n", event, data);
 			}
+		}
+		if (off > end) {
+			printf("ran long\n");
 		}
 	}
 }
