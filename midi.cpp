@@ -93,6 +93,10 @@ void process(FILE *f, const char *fname) {
 				event = data;
 				data = getc(f);
 				off++;
+				if (data >= 0x80) {
+					printf("bad param %u %u\n", event, data);
+					exit(EXIT_FAILURE);
+				}
 			} else {
 				printf("repeat event ");
 			}
@@ -101,43 +105,68 @@ void process(FILE *f, const char *fname) {
 				unsigned data2 = getc(f);
 				off++;
 				printf("note off %u %u %u\n", event, data, data2);
-				if (data2 != 0) {
-					printf("expected note off 0\n");
+				if (data2 >= 0x80) {
+					printf("bad param\n");
 				}
-			}
-			if (event >= 0x90 && event <= 0x9F) {
+			} else if (event >= 0x90 && event <= 0x9F) {
 				unsigned data2 = getc(f);
 				off++;
 				printf("note on %u %u %u\n", event, data, data2);
-			}
-			if (event >= 0xA0 && event <= 0xAF) {
+				if (data2 >= 0x80) {
+					printf("bad param\n");
+				}
+			} else if (event >= 0xA0 && event <= 0xAF) {
 				unsigned data2 = getc(f);
 				off++;
 				printf("pressure %u %u %u\n", event, data, data2);
-			}
-			if (event >= 0xB0 && event <= 0xBF) {
+				if (data2 >= 0x80) {
+					printf("bad param\n");
+				}
+			} else if (event >= 0xB0 && event <= 0xBF) {
 				unsigned data2 = getc(f);
 				off++;
 				printf("control %u %u %u\n", event, data, data2);
-			}
-			if (event >= 0xC0 && event <= 0xCF) {
+				if (data2 >= 0x80) {
+					printf("bad param\n");
+				}
+			} else if (event >= 0xC0 && event <= 0xCF) {
 				printf("program %u %u\n", event, data);
-			}
-			if (event >= 0xD0 && event <= 0xDF) {
+			} else if (event >= 0xD0 && event <= 0xDF) {
 				printf("channel pressure %u %u\n", event, data);
-			}
-			if (event >= 0xE0 && event <= 0xEF) {
-				printf("pitch bend %u %u\n", event, data);
-			}
-			if (event == 0xFF) {
+			} else if (event >= 0xE0 && event <= 0xEF) {
+				unsigned data2 = getc(f);
+				off++;
+				printf("pitch bend %u %u %u\n", event, data, data2);
+			} else if (event == 0xF0) {
+				ungetc(data, f);
+				off--;
 				unsigned metalen = readvar(f, &off);
-				char meta[metalen];
+				unsigned char meta[metalen];
 				if (fread(meta, sizeof(char), metalen, f) != metalen) {
 					fprintf(stderr, "%s: short read of %u for meta\n", fname, metalen);
 					exit(EXIT_FAILURE);
 				}
 				off += metalen;
-				printf("meta %u %u\n", event, data);
+				printf("meta %02x %02x: %u\n", event, data, metalen);
+			} else if (event == 0xFF) {
+				unsigned metalen = readvar(f, &off);
+				unsigned char meta[metalen];
+				if (fread(meta, sizeof(char), metalen, f) != metalen) {
+					fprintf(stderr, "%s: short read of %u for meta\n", fname, metalen);
+					exit(EXIT_FAILURE);
+				}
+				off += metalen;
+				printf("meta %02x %02x: %u\n", event, data, metalen);
+				for (size_t i = 0; i < metalen; i++) {
+					if (meta[i] < ' ' || meta[i] > 0x7E) {
+						printf("\\x%02X", meta[i]);
+					} else {
+						printf("%c", meta[i]);
+					}
+				}
+				printf("\n");
+			} else {
+				printf("unknown event %u %u\n", event, data);
 			}
 		}
 		if (off > end) {
