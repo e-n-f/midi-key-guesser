@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <vector>
+#include <map>
 
 struct note {
 	long long start;
@@ -47,6 +48,20 @@ unsigned readvar(FILE *f, long long *off) {
 		if ((c & 0x80) == 0) {
 			return ret;
 		}
+	}
+}
+
+void note_off(std::vector<note> &notes, std::map<std::pair<size_t, size_t>, size_t> &playing, unsigned event, unsigned data, long long when, bool warn) {
+	auto i = playing.find(std::pair<size_t, size_t>(event, data));
+	if (i != playing.end()) {
+		if (notes[i->second].pitch != data) {
+			fprintf(stderr, "wrong pitch\n");
+			exit(EXIT_FAILURE);
+		}
+		notes[i->second].end = when;
+		playing.erase(i);
+	} else if (warn) {
+		// printf("%u %u is not playing\n", event, data);
 	}
 }
 
@@ -95,6 +110,8 @@ std::vector<note> process(FILE *f, const char *fname) {
 		unsigned event = 0;
 		long long now = 0;
 
+		std::map<std::pair<size_t, size_t>, size_t> playing;
+
 		while (off < end) {
 			unsigned delta = readvar(f, &off);
 			// printf("delta %u\n", delta);
@@ -121,6 +138,8 @@ std::vector<note> process(FILE *f, const char *fname) {
 				if (data2 >= 0x80) {
 					// printf("bad param\n");
 				}
+
+				note_off(notes, playing, event & 0x0F, data, now, true);
 			} else if (event >= 0x90 && event <= 0x9F) {
 				unsigned data2 = getc(f);
 				off++;
@@ -129,11 +148,14 @@ std::vector<note> process(FILE *f, const char *fname) {
 					// printf("bad param\n");
 				}
 
+				note_off(notes, playing, event & 0x0F, data, now, data2 == 0);
+
 				note n;
 				n.start = now;
-				n.end = now;  // XXX
+				n.end = 0;
 				n.pitch = data;
 
+				playing.insert(std::pair<std::pair<size_t, size_t>, size_t>(std::pair<size_t, size_t>(event & 0x0F, data), notes.size()));
 				notes.push_back(n);
 			} else if (event >= 0xA0 && event <= 0xAF) {
 				unsigned data2 = getc(f);
@@ -196,6 +218,12 @@ std::vector<note> process(FILE *f, const char *fname) {
 		}
 	}
 
+#if 0
+	for (size_t i = 0; i < notes.size(); i++) {
+		printf("%u %lld %lld\n", notes[i].pitch, notes[i].start, notes[i].end);
+	}
+#endif
+
 	return notes;
 }
 
@@ -206,7 +234,9 @@ void identify_key(std::vector<note> const &notes, const char *name) {
 	}
 
 	for (size_t i = 0; i < notes.size(); i++) {
-		pitches[notes[i].pitch % 12]++;
+		if (notes[i].end > notes[i].start) {
+			pitches[notes[i].pitch % 12] += notes[i].end - notes[i].start;
+		}
 	}
 
 	size_t key = 0;
