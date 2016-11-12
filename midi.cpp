@@ -2,6 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <vector>
+
+struct note {
+	long long start;
+	long long end;
+	unsigned pitch;
+};
 
 unsigned read4(FILE *f, long long *off) {
 	unsigned char v[4];
@@ -43,7 +50,7 @@ unsigned readvar(FILE *f, long long *off) {
 	}
 }
 
-void process(FILE *f, const char *fname) {
+std::vector<note> process(FILE *f, const char *fname) {
 	long long off;
 	char sig[4];
 	if (fread(sig, sizeof(char), 4, f) != 4) {
@@ -61,11 +68,15 @@ void process(FILE *f, const char *fname) {
 	unsigned tracks = read2(f, &off);
 	unsigned pulses_per_q = read2(f, &off);
 
+#if 0
 	printf("reading %s\n", fname);
 	printf("headerlen %u\n", headerlen);
 	printf("track_types %u\n", track_types);
 	printf("tracks %u\n", tracks);
 	printf("pulses_per_q %u\n", pulses_per_q);
+#endif
+
+	std::vector<note> notes;
 
 	for (size_t i = 0; i < tracks; i++) {
 		if (fread(sig, sizeof(char), 4, f) != 4) {
@@ -79,13 +90,15 @@ void process(FILE *f, const char *fname) {
 		}
 
 		size_t tracklen = read4(f, &off);
-		printf("%zu bytes in track\n", tracklen);
+		// printf("%zu bytes in track\n", tracklen);
 		size_t end = off + tracklen;
 		unsigned event = 0;
+		long long now = 0;
 
 		while (off < end) {
 			unsigned delta = readvar(f, &off);
-			printf("delta %u\n", delta);
+			// printf("delta %u\n", delta);
+			now += delta;
 
 			unsigned data = getc(f);
 			off++;
@@ -94,49 +107,56 @@ void process(FILE *f, const char *fname) {
 				data = getc(f);
 				off++;
 				if (data >= 0x80) {
-					printf("bad param %u %u\n", event, data);
+					// printf("bad param %u %u\n", event, data);
 					exit(EXIT_FAILURE);
 				}
 			} else {
-				printf("repeat event ");
+				// printf("repeat event ");
 			}
 
 			if (event >= 0x80 && event <= 0x8F) {
 				unsigned data2 = getc(f);
 				off++;
-				printf("note off %u %u %u\n", event, data, data2);
+				// printf("note off %u %u %u\n", event, data, data2);
 				if (data2 >= 0x80) {
-					printf("bad param\n");
+					// printf("bad param\n");
 				}
 			} else if (event >= 0x90 && event <= 0x9F) {
 				unsigned data2 = getc(f);
 				off++;
-				printf("note on %u %u %u\n", event, data, data2);
+				// printf("note on %u %u %u\n", event, data, data2);
 				if (data2 >= 0x80) {
-					printf("bad param\n");
+					// printf("bad param\n");
 				}
+
+				note n;
+				n.start = now;
+				n.end = now;  // XXX
+				n.pitch = data;
+
+				notes.push_back(n);
 			} else if (event >= 0xA0 && event <= 0xAF) {
 				unsigned data2 = getc(f);
 				off++;
-				printf("pressure %u %u %u\n", event, data, data2);
+				// printf("pressure %u %u %u\n", event, data, data2);
 				if (data2 >= 0x80) {
-					printf("bad param\n");
+					// printf("bad param\n");
 				}
 			} else if (event >= 0xB0 && event <= 0xBF) {
 				unsigned data2 = getc(f);
 				off++;
-				printf("control %u %u %u\n", event, data, data2);
+				// printf("control %u %u %u\n", event, data, data2);
 				if (data2 >= 0x80) {
-					printf("bad param\n");
+					// printf("bad param\n");
 				}
 			} else if (event >= 0xC0 && event <= 0xCF) {
-				printf("program %u %u\n", event, data);
+				// printf("program %u %u\n", event, data);
 			} else if (event >= 0xD0 && event <= 0xDF) {
-				printf("channel pressure %u %u\n", event, data);
+				// printf("channel pressure %u %u\n", event, data);
 			} else if (event >= 0xE0 && event <= 0xEF) {
 				unsigned data2 = getc(f);
 				off++;
-				printf("pitch bend %u %u %u\n", event, data, data2);
+				// printf("pitch bend %u %u %u\n", event, data, data2);
 			} else if (event == 0xF0) {
 				ungetc(data, f);
 				off--;
@@ -147,7 +167,7 @@ void process(FILE *f, const char *fname) {
 					exit(EXIT_FAILURE);
 				}
 				off += metalen;
-				printf("meta %02x %02x: %u\n", event, data, metalen);
+				// printf("meta %02x %02x: %u\n", event, data, metalen);
 			} else if (event == 0xFF) {
 				unsigned metalen = readvar(f, &off);
 				unsigned char meta[metalen];
@@ -156,6 +176,7 @@ void process(FILE *f, const char *fname) {
 					exit(EXIT_FAILURE);
 				}
 				off += metalen;
+#if 0
 				printf("meta %02x %02x: %u\n", event, data, metalen);
 				for (size_t i = 0; i < metalen; i++) {
 					if (meta[i] < ' ' || meta[i] > 0x7E) {
@@ -165,14 +186,56 @@ void process(FILE *f, const char *fname) {
 					}
 				}
 				printf("\n");
+#endif
 			} else {
-				printf("unknown event %u %u\n", event, data);
+				// printf("unknown event %u %u\n", event, data);
 			}
 		}
 		if (off > end) {
-			printf("ran long\n");
+			// printf("ran long\n");
 		}
 	}
+
+	return notes;
+}
+
+void identify_key(std::vector<note> const &notes, const char *name) {
+	size_t pitches[12];
+	for (size_t i = 0; i < 12; i++) {
+		pitches[i] = 0;
+	}
+
+	for (size_t i = 0; i < notes.size(); i++) {
+		pitches[notes[i].pitch % 12]++;
+	}
+
+	size_t key = 0;
+	double max = 0;
+
+	const char *accidentals = ".#.#..#.#.#.";
+	for (size_t i = 0; i < 12; i++) {
+		size_t nat = 0, art = 0;
+
+		for (size_t j = 0; j < 12; j++) {
+			if (accidentals[j] == '#') {
+				art += pitches[(i + j) % 12];
+			} else {
+				nat += pitches[(i + j) % 12];
+			}
+		}
+
+		printf("%.3f ", nat / (double) (art + nat));
+
+		if (nat / (double) (art + nat) > max) {
+			max = nat / (double) (art + nat);
+			key = i;
+		}
+	}
+
+	const char *keys = "C DbD EbE F GbG AbA BbB ";
+	printf("%c%c ", keys[key * 2], keys[key * 2 + 1]);
+
+	printf("%s\n", name);
 }
 
 int main(int argc, char **argv) {
@@ -184,7 +247,8 @@ int main(int argc, char **argv) {
 	}
 
 	if (optind >= argc) {
-		process(stdin, "standard input");
+		std::vector<note> notes = process(stdin, "standard input");
+		identify_key(notes, "standard input");
 	} else {
 		for (i = optind; i < argc; i++) {
 			FILE *f = fopen(argv[i], "rb");
@@ -193,7 +257,8 @@ int main(int argc, char **argv) {
 				exit(EXIT_FAILURE);
 			}
 
-			process(f, argv[i]);
+			std::vector<note> notes = process(f, argv[i]);
+			identify_key(notes, argv[i]);
 			fclose(f);
 		}
 	}
