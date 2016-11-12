@@ -155,8 +155,10 @@ std::vector<note> process(FILE *f, const char *fname) {
 				n.end = 0;
 				n.pitch = data;
 
-				playing.insert(std::pair<std::pair<size_t, size_t>, size_t>(std::pair<size_t, size_t>(event & 0x0F, data), notes.size()));
-				notes.push_back(n);
+				if (data2 != 0) {
+					playing.insert(std::pair<std::pair<size_t, size_t>, size_t>(std::pair<size_t, size_t>(event & 0x0F, data), notes.size()));
+					notes.push_back(n);
+				}
 			} else if (event >= 0xA0 && event <= 0xAF) {
 				unsigned data2 = getc(f);
 				off++;
@@ -215,6 +217,10 @@ std::vector<note> process(FILE *f, const char *fname) {
 		}
 		if (off > end) {
 			// printf("ran long\n");
+		}
+
+		for (auto i = playing.begin(); i != playing.end(); ++i) {
+			printf("never finished: %lu %lu\n", i->first.first, i->first.second);
 		}
 	}
 
